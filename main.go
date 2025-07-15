@@ -285,20 +285,20 @@ func printAST(n node) {
 
 	switch n.t {
 	case ntRoot:
-		for _, child := range(n.rootChildNodes) {
+		for _, child := range n.rootChildNodes {
 			printAST(child)
 		}
 
 	case ntOpAssign:
 		fmt.Print("[=]: ")
-		for _, child := range(n.opArgs) {
+		for _, child := range n.opArgs {
 			printAST(child)
 		}
 		fmt.Println("")
 
 	case ntOpPutByte:
 		fmt.Print("[@]: ")
-		for _, child := range(n.opArgs) {
+		for _, child := range n.opArgs {
 			printAST(child)
 		}
 		fmt.Println("")
@@ -308,7 +308,7 @@ func printAST(n node) {
 
 	case ntIntLiteral:
 		fmt.Printf("%v ", n.intLitValue)
-	
+
 	default:
 		fmt.Print("UNRECOGNIZED ")
 	}
