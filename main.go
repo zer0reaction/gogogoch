@@ -5,7 +5,7 @@ import (
 	"log"
 	"os"
 	"strconv"
-	// "strings"
+	"strings"
 )
 
 type token struct {
@@ -21,7 +21,7 @@ const (
 	ttEqual
 	ttInteger
 	ttSemicolon
-	ttDog
+	ttPutbyte
 	ttEOF
 	ttCounter
 )
@@ -32,7 +32,7 @@ const (
 	ntEmpty nodeType = iota
 	ntRoot
 	ntOpAssign
-	ntOpPutByte
+	ntOpPutbyte
 	ntVariable
 	ntIntLiteral
 	ntCounter
@@ -65,13 +65,10 @@ func main() {
 		log.Fatal(err)
 	}
 
-	// printTokens(tokens)
-
 	root, err := parse(tokens)
 	if err != nil {
 		log.Fatal(err)
 	}
-	printAST(root)
 
 	code, err := codegen(root)
 	if err != nil {
@@ -104,10 +101,10 @@ func tokenize(s string) ([]token, error) {
 			t.t = ttSemicolon
 			s = s[1:]
 
-		// put byte
-		case s[0] == '@':
-			t.t = ttDog
-			s = s[1:]
+		// putbyte
+		case strings.HasPrefix(s, "putbyte "):
+			t.t = ttPutbyte
+			s = s[len("putbyte "):]
 
 		// integer
 		// NOTE: no checks
@@ -155,8 +152,8 @@ func printTokens(ts []token) {
 			fmt.Print("[=] ")
 		case ttInteger:
 			fmt.Printf("(integer %s) ", t.data)
-		case ttDog:
-			fmt.Print("[@] ")
+		case ttPutbyte:
+			fmt.Print("[putbyte] ")
 		case ttSemicolon:
 			fmt.Print("[;]\n")
 		case ttEOF:
@@ -166,8 +163,6 @@ func printTokens(ts []token) {
 }
 
 func parse(ts []token) (node, error) {
-	// fmt.Printf("%+v\n", ts)
-
 	if ttCounter != 7 {
 		panic("parse: not all tokens implemented")
 	}
@@ -205,15 +200,15 @@ func parse(ts []token) (node, error) {
 		}
 	case len(ts) == 2:
 		switch {
-		// put byte
-		case ts[0].t == ttDog:
+		// putbyte
+		case ts[0].t == ttPutbyte:
 			op := node{
-				t: ntOpPutByte,
+				t: ntOpPutbyte,
 			}
 
 			arg, err := parse(ts[1:2])
 			if err != nil {
-				return node{t: ntEmpty}, fmt.Errorf("failed to parse arg of '@'")
+				return node{t: ntEmpty}, fmt.Errorf("failed to parse arg of 'putbyte'")
 			}
 
 			op.opArgs = append(op.opArgs, arg)
@@ -306,8 +301,8 @@ func printAST(n node) {
 		}
 		fmt.Println("")
 
-	case ntOpPutByte:
-		fmt.Print("[@]: ")
+	case ntOpPutbyte:
+		fmt.Print("[putbyte]: ")
 		for _, child := range n.opArgs {
 			printAST(child)
 		}
@@ -324,13 +319,6 @@ func printAST(n node) {
 	}
 }
 
-/*
-	ntOpAssign
-	ntOpPutByte
-	ntVariable
-	ntIntLiteral
-*/
-
 func checkVarExistence(vars []variable, name string) int {
 	for i, v := range vars {
 		if v.name == name {
@@ -341,6 +329,10 @@ func checkVarExistence(vars []variable, name string) int {
 }
 
 func codegen(root node) (string, error) {
+	if ntCounter != 6 {
+		panic("codegen: not all nodes implemented")
+	}
+
 	var code string = `.section .text
 .globl _start
 
@@ -412,12 +404,12 @@ _start:
 				return "", fmt.Errorf("codegen: incorrect right argument of '='")
 			}
 
-		case ntOpPutByte:
+		case ntOpPutbyte:
 			args := node.opArgs
 
 			// we assume the opposite (it is checked in the parser)
 			if len(args) != 1 {
-				panic("codegen: incorrect number of arguments for '@'")
+				panic("codegen: incorrect number of arguments for 'putbyte'")
 			}
 
 			var allignOffset int32 = 0
@@ -441,7 +433,7 @@ _start:
 				code += "\tcall\tputbyte\n"
 
 			default:
-				return "", fmt.Errorf("codegen: incorrect argument of '@'")
+				return "", fmt.Errorf("codegen: incorrect argument of 'putbyte'")
 			}
 
 			if allignOffset != 0 {
