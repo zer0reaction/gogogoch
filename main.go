@@ -48,6 +48,11 @@ type node struct {
 	intLitValue    uint32
 }
 
+type variable struct {
+	name   string
+	offset int32
+}
+
 func main() {
 	log.SetFlags(0)
 
@@ -66,8 +71,13 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-
 	printAST(root)
+
+	code, err := codegen(root)
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println(code)
 }
 
 func tokenize(s string) ([]token, error) {
@@ -253,7 +263,7 @@ func parse(ts []token) (node, error) {
 			if ts[0].t == ttSemicolon {
 				n, err := parse(accumulated)
 				if err != nil {
-					return node{t: ntEmpty}, fmt.Errorf("failed to parse root")
+					return node{t: ntEmpty}, err
 				}
 
 				root.rootChildNodes = append(root.rootChildNodes, n)
@@ -312,4 +322,138 @@ func printAST(n node) {
 	default:
 		fmt.Print("UNRECOGNIZED ")
 	}
+}
+
+/*
+	ntOpAssign
+	ntOpPutByte
+	ntVariable
+	ntIntLiteral
+*/
+
+func checkVarExistence(vars []variable, name string) int {
+	for i, v := range vars {
+		if v.name == name {
+			return i
+		}
+	}
+	return -1
+}
+
+func codegen(root node) (string, error) {
+	var code string = `.section .text
+.globl _start
+
+putbyte:
+	pushq	%rbp
+	movq	%rsp, %rbp
+
+	movb	%dil, -1(%rbp)
+
+	movq	$1, %rax
+	movq	$1, %rdi
+	leaq	-1(%rbp), %rsi
+	movq	$1, %rdx
+	syscall
+
+	leave
+	ret
+
+_start:
+	mov %rsp, %rbp
+
+`
+	var globalVars []variable
+	var globalOffset int32 = 0
+
+	for _, node := range root.rootChildNodes {
+		switch node.t {
+		case ntOpAssign:
+			args := node.opArgs
+
+			// we assume the opposite (it is checked in the parser)
+			if len(args) != 2 {
+				panic("codegen: incorrect number of arguments for '='")
+			}
+			if args[0].t != ntVariable {
+				panic("codegen: left argument of '=' is not a variable")
+			}
+
+			varInd := checkVarExistence(globalVars, args[0].varName)
+
+			if varInd == -1 {
+				globalOffset -= 4
+				v := variable{
+					offset: globalOffset,
+					name:   args[0].varName,
+				}
+				globalVars = append(globalVars, v)
+				varInd = len(globalVars) - 1
+			}
+
+			switch args[1].t {
+			case ntIntLiteral:
+				leftVar := globalVars[varInd]
+				code += fmt.Sprintf("\tmovl\t$%d, %d(%%rbp)\n", args[1].intLitValue, leftVar.offset)
+
+			case ntVariable:
+				rightVarInd := checkVarExistence(globalVars, args[1].varName)
+				if rightVarInd == -1 {
+					return "", fmt.Errorf("codegen: trying to assign to a non-existing variable")
+				}
+
+				leftVar := globalVars[varInd]
+				rightVar := globalVars[rightVarInd]
+
+				code += fmt.Sprintf("\tmovl\t%d(%%rbp), %%eax\n", rightVar.offset)
+				code += fmt.Sprintf("\tmovl\t%%eax, %d(%%rbp)\n", leftVar.offset)
+
+			default:
+				return "", fmt.Errorf("codegen: incorrect right argument of '='")
+			}
+
+		case ntOpPutByte:
+			args := node.opArgs
+
+			// we assume the opposite (it is checked in the parser)
+			if len(args) != 1 {
+				panic("codegen: incorrect number of arguments for '@'")
+			}
+
+			var allignOffset int32 = 0
+			if (-globalOffset)%16 != 0 {
+				allignOffset = -(16 - (-globalOffset)%16)
+				code += fmt.Sprintf("\taddq\t$%d, %%rsp\n", allignOffset)
+			}
+
+			switch args[0].t {
+			case ntVariable:
+				varInd := checkVarExistence(globalVars, args[0].varName)
+				if varInd == -1 {
+					return "", fmt.Errorf("codegen: trying to print a non-existing variable")
+				}
+
+				code += fmt.Sprintf("\tmovl\t%d(%%rbp), %%edi\n", globalVars[varInd].offset)
+				code += "\tcall\tputbyte\n"
+
+			case ntIntLiteral:
+				code += fmt.Sprintf("\tmovl\t$%d, %%edi\n", args[0].intLitValue)
+				code += "\tcall\tputbyte\n"
+
+			default:
+				return "", fmt.Errorf("codegen: incorrect argument of '@'")
+			}
+
+			if allignOffset != 0 {
+				code += fmt.Sprintf("\tsubq\t$%d, %%rsp\n", allignOffset)
+			}
+		}
+	}
+
+	code += `
+	movq	$60, %rax
+	movq	$0, %rdi
+	syscall`
+
+	return code, nil
 }
