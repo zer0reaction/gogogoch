@@ -50,17 +50,22 @@ type node struct {
 
 type variable struct {
 	name   string
-	offset int32
+	offset uint32
 }
 
 func main() {
 	log.SetFlags(0)
 
-	if len(os.Args) != 2 {
+	if len(os.Args) != 3 {
 		log.Fatal("incorrect number of arguments")
 	}
 
-	tokens, err := tokenize(os.Args[1])
+	contents, err := os.ReadFile(os.Args[1])
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	tokens, err := tokenize(string(contents))
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -74,7 +79,11 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	fmt.Println(code)
+
+	err = os.WriteFile(os.Args[2], []byte(code), 0644)
+	if err != nil {
+		log.Fatal(err)
+	}
 }
 
 func tokenize(s string) ([]token, error) {
@@ -356,7 +365,7 @@ _start:
 
 `
 	var globalVars []variable
-	var globalOffset int32 = 0
+	var globalOffset uint32 = 0
 
 	for _, node := range root.rootChildNodes {
 		switch node.t {
@@ -374,7 +383,7 @@ _start:
 			varInd := checkVarExistence(globalVars, args[0].varName)
 
 			if varInd == -1 {
-				globalOffset -= 4
+				globalOffset += 4
 				v := variable{
 					offset: globalOffset,
 					name:   args[0].varName,
@@ -386,7 +395,7 @@ _start:
 			switch args[1].t {
 			case ntIntLiteral:
 				leftVar := globalVars[varInd]
-				code += fmt.Sprintf("\tmovl\t$%d, %d(%%rbp)\n", args[1].intLitValue, leftVar.offset)
+				code += fmt.Sprintf("\tmovl\t$%d, -%d(%%rbp)\n", args[1].intLitValue, leftVar.offset)
 
 			case ntVariable:
 				rightVarInd := checkVarExistence(globalVars, args[1].varName)
@@ -397,8 +406,8 @@ _start:
 				leftVar := globalVars[varInd]
 				rightVar := globalVars[rightVarInd]
 
-				code += fmt.Sprintf("\tmovl\t%d(%%rbp), %%eax\n", rightVar.offset)
-				code += fmt.Sprintf("\tmovl\t%%eax, %d(%%rbp)\n", leftVar.offset)
+				code += fmt.Sprintf("\tmovl\t-%d(%%rbp), %%eax\n", rightVar.offset)
+				code += fmt.Sprintf("\tmovl\t%%eax, -%d(%%rbp)\n", leftVar.offset)
 
 			default:
 				return "", fmt.Errorf("codegen: incorrect right argument of '='")
@@ -412,11 +421,12 @@ _start:
 				panic("codegen: incorrect number of arguments for 'putbyte'")
 			}
 
-			var allignOffset int32 = 0
-			if (-globalOffset)%16 != 0 {
-				allignOffset = -(16 - (-globalOffset)%16)
-				code += fmt.Sprintf("\taddq\t$%d, %%rsp\n", allignOffset)
-			}
+			// To make sure:
+			// 1. Stack frames don't collide
+			// 2. The stack is 16 byte aligned
+			rspOffset := globalOffset + (16-globalOffset%16)%16
+
+			code += fmt.Sprintf("\tsubq\t$%d, %%rsp\n", rspOffset)
 
 			switch args[0].t {
 			case ntVariable:
@@ -425,7 +435,7 @@ _start:
 					return "", fmt.Errorf("codegen: trying to print a non-existing variable")
 				}
 
-				code += fmt.Sprintf("\tmovl\t%d(%%rbp), %%edi\n", globalVars[varInd].offset)
+				code += fmt.Sprintf("\tmovl\t-%d(%%rbp), %%edi\n", globalVars[varInd].offset)
 				code += "\tcall\tputbyte\n"
 
 			case ntIntLiteral:
@@ -436,16 +446,15 @@ _start:
 				return "", fmt.Errorf("codegen: incorrect argument of 'putbyte'")
 			}
 
-			if allignOffset != 0 {
-				code += fmt.Sprintf("\tsubq\t$%d, %%rsp\n", allignOffset)
-			}
+			code += fmt.Sprintf("\taddq\t$%d, %%rsp\n", rspOffset)
 		}
 	}
 
 	code += `
 	movq	$60, %rax
 	movq	$0, %rdi
-	syscall`
+	syscall
+`
 
 	return code, nil
 }
