@@ -19,8 +19,8 @@ const (
 	ttEmpty tokenType = iota
 	ttSymbol
 	ttEqual
-	ttInteger
-	ttChar
+	ttIntegerLiteral
+	ttCharLiteral
 	ttSemicolon
 	ttPutbyte
 	ttEOF
@@ -121,7 +121,7 @@ func tokenize(s string) ([]token, error) {
 		// integer
 		// NOTE: no checks
 		case s[0] >= '0' && s[0] <= '9':
-			t.t = ttInteger
+			t.t = ttIntegerLiteral
 			for len(s) > 0 && s[0] >= '0' && s[0] <= '9' {
 				t.data += (string)(s[0])
 				s = s[1:]
@@ -130,7 +130,7 @@ func tokenize(s string) ([]token, error) {
 		// char
 		// NOTE: no escape characters or checks
 		case len(s) >= 3 && s[0] == '\'' && s[2] == '\'':
-			t.t = ttChar
+			t.t = ttCharLiteral
 			t.data = string(s[1])
 			s = s[3:]
 
@@ -169,7 +169,7 @@ func printTokens(ts []token) {
 			fmt.Printf("%s ", t.data)
 		case ttEqual:
 			fmt.Print("[=] ")
-		case ttInteger:
+		case ttIntegerLiteral:
 			fmt.Printf("(integer %s) ", t.data)
 		case ttPutbyte:
 			fmt.Print("[putbyte] ")
@@ -201,7 +201,7 @@ func parse(ts []token) (node, error) {
 			return v, nil
 
 		// int literal
-		case ts[0].t == ttInteger:
+		case ts[0].t == ttIntegerLiteral:
 			val, err := strconv.ParseInt(ts[0].data, 10, 32)
 			if err != nil {
 				return node{t: ntEmpty}, err
@@ -215,7 +215,7 @@ func parse(ts []token) (node, error) {
 			return il, nil
 
 		// character literal
-		case ts[0].t == ttChar:
+		case ts[0].t == ttCharLiteral:
 			if len(ts[0].data) != 1 {
 				panic("length of char literal != 1")
 			}
