@@ -20,6 +20,7 @@ const (
 	ttSymbol
 	ttEqual
 	ttInteger
+	ttChar
 	ttSemicolon
 	ttPutbyte
 	ttEOF
@@ -35,6 +36,7 @@ const (
 	ntOpPutbyte
 	ntVariable
 	ntIntLiteral
+	ntCharLiteral
 	ntCounter
 )
 
@@ -46,6 +48,7 @@ type node struct {
 	opArgs         []node
 	varName        string
 	intLitValue    uint32
+	charLitValue   uint8
 }
 
 type variable struct {
@@ -89,7 +92,7 @@ func main() {
 func tokenize(s string) ([]token, error) {
 	var ts []token
 
-	if ttCounter != 7 {
+	if ttCounter != 8 {
 		panic("tokenize: not all tokens implemented")
 	}
 
@@ -124,10 +127,17 @@ func tokenize(s string) ([]token, error) {
 				s = s[1:]
 			}
 
+		// char
+		// NOTE: no escape characters or checks
+		case len(s) >= 3 && s[0] == '\'' && s[2] == '\'':
+			t.t = ttChar
+			t.data = string(s[1])
+			s = s[3:]
+
 		// symbol
 		case s[0] >= 'a' && s[0] <= 'z':
 			t.t = ttSymbol
-			for len(s) > 0 && s[0] >= 'a' && s[0] <= 'z' {
+			for len(s) > 0 && (s[0] >= 'a' && s[0] <= 'z' || s[0] == '_') {
 				t.data += (string)(s[0])
 				s = s[1:]
 			}
@@ -172,10 +182,10 @@ func printTokens(ts []token) {
 }
 
 func parse(ts []token) (node, error) {
-	if ttCounter != 7 {
+	if ttCounter != 8 {
 		panic("parse: not all tokens implemented")
 	}
-	if ntCounter != 6 {
+	if ntCounter != 7 {
 		panic("parse: not all nodes implemented")
 	}
 
@@ -203,6 +213,17 @@ func parse(ts []token) (node, error) {
 			}
 
 			return il, nil
+
+		// character literal
+		case ts[0].t == ttChar:
+			if len(ts[0].data) != 1 {
+				panic("length of char literal != 1")
+			}
+			cl := node{
+				t:            ntCharLiteral,
+				charLitValue: uint8(ts[0].data[0]),
+			}
+			return cl, nil
 
 		default:
 			return node{t: ntEmpty}, fmt.Errorf("unexpected token type while trying to parse 1 token")
@@ -338,7 +359,7 @@ func checkVarExistence(vars []variable, name string) int {
 }
 
 func codegen(root node) (string, error) {
-	if ntCounter != 6 {
+	if ntCounter != 7 {
 		panic("codegen: not all nodes implemented")
 	}
 
@@ -397,6 +418,10 @@ _start:
 				leftVar := globalVars[varInd]
 				code += fmt.Sprintf("\tmovl\t$%d, -%d(%%rbp)\n", args[1].intLitValue, leftVar.offset)
 
+			case ntCharLiteral:
+				leftVar := globalVars[varInd]
+				code += fmt.Sprintf("\tmovl\t$%d, -%d(%%rbp)\n", args[1].charLitValue, leftVar.offset)
+
 			case ntVariable:
 				rightVarInd := checkVarExistence(globalVars, args[1].varName)
 				if rightVarInd == -1 {
@@ -440,6 +465,10 @@ _start:
 
 			case ntIntLiteral:
 				code += fmt.Sprintf("\tmovl\t$%d, %%edi\n", args[0].intLitValue)
+				code += "\tcall\tputbyte\n"
+
+			case ntCharLiteral:
+				code += fmt.Sprintf("\tmovb\t$%d, %%dil\n", args[0].charLitValue)
 				code += "\tcall\tputbyte\n"
 
 			default:
