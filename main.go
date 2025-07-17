@@ -66,7 +66,7 @@ type node struct {
 	}
 
 	expr struct {
-		t exprType
+		t    exprType
 		arg1 *node
 		arg2 *node
 	}
@@ -111,7 +111,7 @@ func printNode(n node) {
 		fmt.Printf("let [%d] %s = ", n.varDecl.t, n.varDecl.name)
 		printNode(*n.varDecl.value)
 		fmt.Printf("\n")
-	
+
 	case ntExpr:
 		fmt.Printf("[%d](", n.expr.t)
 		printNode(*n.expr.arg1)
@@ -160,8 +160,8 @@ func chopNode(ts []token) (node, []token, error) {
 
 	// TODO: refactor
 	case len(ts) >= 3 && ts[1].t == ttPlus:
-		n.t = ntExpr;
-		n.expr.t = etSum;
+		n.t = ntExpr
+		n.expr.t = etSum
 
 		arg1, left, err := chopNode(ts[0:1])
 		if err != nil {
@@ -175,7 +175,7 @@ func chopNode(ts []token) (node, []token, error) {
 
 		n.expr.arg1 = &arg1
 		n.expr.arg2 = &arg2
-		
+
 		return n, left, nil
 
 	// for non-initialized variables
