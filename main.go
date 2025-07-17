@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"log"
 	"os"
-	// "strconv"
+	"strconv"
 	"strings"
 )
 
@@ -15,7 +15,6 @@ type tokenType uint32
 const (
 	ttEmpty tokenType = iota // used for initialization and errors
 	ttBlank
-	ttEOF
 	ttIdentifier
 	ttSemicolon
 	ttBracketOpen
@@ -35,29 +34,46 @@ type token struct {
 
 // NODES
 
+type varType uint32
+
+const (
+	vtU32 varType = iota
+)
+
+type exprType uint32
+
+const (
+	etSum exprType = iota
+)
+
 type nodeType uint32
 
 const (
 	ntEmpty nodeType = iota
+	ntVarDecl
+	ntExpr
+	ntIntLit
 	ntCounter
 )
 
 type node struct {
 	t nodeType
-}
 
-// VARIABLES
+	varDecl struct {
+		t     varType
+		name  string
+		value *node
+	}
 
-type variableType uint32
+	expr struct {
+		t exprType
+		arg1 *node
+		arg2 *node
+	}
 
-const (
-	vtU32 variableType = iota
-)
-
-type variable struct {
-	t      variableType
-	name   string
-	offset uint32
+	intLit struct {
+		value int64 // NOTE: currently no support for signed literals
+	}
 }
 
 func main() {
@@ -78,10 +94,187 @@ func main() {
 	}
 
 	printTokens(ts)
+
+	ns, err := parse(ts)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	for _, n := range ns {
+		printNode(n)
+	}
+}
+
+/*
+const (
+	ntEmpty nodeType = iota
+	ntVarDecl
+	ntExpr
+	ntIntLit
+	ntCounter
+)
+
+type node struct {
+	t nodeType
+
+	varDecl struct {
+		t     varType
+		name  string
+		value *node
+	}
+
+	expr struct {
+		t exprType
+		arg1 *node
+		arg2 *node
+	}
+
+	intLit struct {
+		value int64 // NOTE: currently no support for signed literals
+	}
+}
+*/
+
+func printNode(n node) {
+	switch n.t {
+	case ntVarDecl:
+		fmt.Println(n.varDecl.t, n.varDecl.name)
+		printNode(*n.varDecl.value)
+	
+	case ntExpr:
+		fmt.Println(n.expr.t)
+		printNode(*n.expr.arg1)
+		printNode(*n.expr.arg2)
+
+	case ntIntLit:
+		fmt.Println(n.intLit.value)
+
+	case ntEmpty:
+		fmt.Println("[empty]")
+
+	default:
+		panic("unknown node type")
+	}
+}
+
+func parse(ts []token) ([]node, error) {
+	var ns []node
+
+	for len(ts) > 0 {
+		n, left, err := chopNode(ts)
+		if err != nil {
+			return nil, err
+		}
+
+		if n.t != ntEmpty {
+			ns = append(ns, n)
+		}
+
+		ts = left
+	}
+
+	return ns, nil
+}
+
+func chopNode(ts []token) (node, []token, error) {
+	n := node{
+		t: ntEmpty,
+	}
+
+	// fmt.Println(ts)
+
+	switch {
+	case len(ts) == 0:
+		panic("no tokens passed")
+
+	case len(ts) >= 3 && ts[1].t == ttPlus:
+		n.t = ntExpr;
+		n.expr.t = etSum;
+
+		arg1, left, err := chopNode(ts[0:1])
+		if err != nil {
+			return n, nil, err
+		}
+		ts = ts[2:]
+		arg2, left, err := chopNode(ts)
+		if err != nil {
+			return n, nil, err
+		}
+
+		n.expr.arg1 = &arg1
+		n.expr.arg2 = &arg2
+		
+		return n, left, nil
+
+	case ts[0].t == ttSemicolon:
+		n.t = ntEmpty
+		return n, ts[1:], nil
+
+	case ts[0].t == ttIntLit:
+		n.t = ntIntLit
+		value, err := strconv.ParseInt(ts[0].data, 10, 64)
+		if err != nil {
+			return n, nil, err
+		}
+		n.intLit.value = value
+		return n, ts[1:], nil
+
+	case ts[0].t == ttEqual:
+		ts = ts[1:]
+
+		assignVal, left, err := chopNode(ts)
+
+		if err != nil {
+			return n, nil, err
+		}
+		if assignVal.t == ntEmpty {
+			err := fmt.Errorf("assigning to an empty value")
+			return n, nil, err
+		}
+
+		return assignVal, left, nil
+
+	case ts[0].t == ttLet:
+		if len(ts) < 4 {
+			err := fmt.Errorf("expecting at least 4 tokens in variable declaration")
+			return n, nil, err
+		}
+
+		n.t = ntVarDecl
+		ts = ts[1:]
+
+		switch ts[0].t {
+		case ttU32:
+			n.varDecl.t = vtU32
+		default:
+			err := fmt.Errorf("invalid type in variable declaration")
+			return n, nil, err
+		}
+		ts = ts[1:]
+
+		if ts[0].t != ttIdentifier {
+			err := fmt.Errorf("variable name is not an identifier")
+			return n, nil, err
+		}
+		n.varDecl.name = ts[0].data
+		ts = ts[1:]
+
+		varValue, left, err := chopNode(ts)
+		if err != nil {
+			return n, nil, err
+		}
+		n.varDecl.value = &varValue
+
+		return n, left, nil
+
+	default:
+		err := fmt.Errorf("unexpected token")
+		return n, nil, err
+	}
 }
 
 func printTokens(ts []token) {
-	if ttCounter != 12 {
+	if ttCounter != 11 {
 		panic("not all tokens implemented")
 	}
 
@@ -91,8 +284,6 @@ func printTokens(ts []token) {
 			fmt.Printf("[EMPTY] ")
 		case ttBlank:
 			fmt.Printf("[BLANK] ")
-		case ttEOF:
-			fmt.Printf("[EOF]\n")
 		case ttIdentifier:
 			fmt.Printf("%s ", t.data)
 		case ttSemicolon:
@@ -118,14 +309,13 @@ func printTokens(ts []token) {
 }
 
 func tokenize(s string) ([]token, error) {
-	if ttCounter != 12 {
+	if ttCounter != 11 {
 		panic("not all tokens implemented")
 	}
 
 	var ts []token
-	eof := false
 
-	for !eof {
+	for len(s) > 0 {
 		t, left, err := chopToken(s)
 		if err != nil {
 			return nil, err
@@ -133,9 +323,6 @@ func tokenize(s string) ([]token, error) {
 
 		if t.t != ttBlank {
 			ts = append(ts, t)
-		}
-		if t.t == ttEOF {
-			eof = true
 		}
 
 		s = left
@@ -145,7 +332,7 @@ func tokenize(s string) ([]token, error) {
 }
 
 func chopToken(s string) (token, string, error) {
-	if ttCounter != 12 {
+	if ttCounter != 11 {
 		panic("not all tokens implemented")
 	}
 
@@ -155,10 +342,6 @@ func chopToken(s string) (token, string, error) {
 	}
 
 	switch {
-	case len(s) == 0:
-		t.t = ttEOF
-		return t, "", nil
-
 	// single character tokens
 	case s[0] == ';':
 		t.t = ttSemicolon
