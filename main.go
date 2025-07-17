@@ -93,7 +93,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	printTokens(ts)
+	// printTokens(ts)
 
 	ns, err := parse(ts)
 	if err != nil {
@@ -105,52 +105,25 @@ func main() {
 	}
 }
 
-/*
-const (
-	ntEmpty nodeType = iota
-	ntVarDecl
-	ntExpr
-	ntIntLit
-	ntCounter
-)
-
-type node struct {
-	t nodeType
-
-	varDecl struct {
-		t     varType
-		name  string
-		value *node
-	}
-
-	expr struct {
-		t exprType
-		arg1 *node
-		arg2 *node
-	}
-
-	intLit struct {
-		value int64 // NOTE: currently no support for signed literals
-	}
-}
-*/
-
 func printNode(n node) {
 	switch n.t {
 	case ntVarDecl:
-		fmt.Println(n.varDecl.t, n.varDecl.name)
+		fmt.Printf("let [%d] %s = ", n.varDecl.t, n.varDecl.name)
 		printNode(*n.varDecl.value)
+		fmt.Printf("\n")
 	
 	case ntExpr:
-		fmt.Println(n.expr.t)
+		fmt.Printf("[%d](", n.expr.t)
 		printNode(*n.expr.arg1)
+		fmt.Printf(", ")
 		printNode(*n.expr.arg2)
+		fmt.Printf(") ")
 
 	case ntIntLit:
-		fmt.Println(n.intLit.value)
+		fmt.Printf("%d", n.intLit.value)
 
 	case ntEmpty:
-		fmt.Println("[empty]")
+		fmt.Printf("[empty] ")
 
 	default:
 		panic("unknown node type")
@@ -165,11 +138,11 @@ func parse(ts []token) ([]node, error) {
 		if err != nil {
 			return nil, err
 		}
-
-		if n.t != ntEmpty {
-			ns = append(ns, n)
+		if n.t == ntEmpty {
+			return nil, fmt.Errorf("encountered empty token")
 		}
 
+		ns = append(ns, n)
 		ts = left
 	}
 
@@ -181,12 +154,11 @@ func chopNode(ts []token) (node, []token, error) {
 		t: ntEmpty,
 	}
 
-	// fmt.Println(ts)
-
 	switch {
 	case len(ts) == 0:
 		panic("no tokens passed")
 
+	// TODO: refactor
 	case len(ts) >= 3 && ts[1].t == ttPlus:
 		n.t = ntExpr;
 		n.expr.t = etSum;
@@ -206,6 +178,7 @@ func chopNode(ts []token) (node, []token, error) {
 		
 		return n, left, nil
 
+	// for non-initialized variables
 	case ts[0].t == ttSemicolon:
 		n.t = ntEmpty
 		return n, ts[1:], nil
@@ -222,7 +195,18 @@ func chopNode(ts []token) (node, []token, error) {
 	case ts[0].t == ttEqual:
 		ts = ts[1:]
 
-		assignVal, left, err := chopNode(ts)
+		var accum []token
+
+		for ts[0].t != ttSemicolon {
+			if len(ts) == 1 {
+				return n, nil, fmt.Errorf("assignment is not terminated")
+			}
+			accum = append(accum, ts[0])
+			ts = ts[1:]
+		}
+		ts = ts[1:]
+
+		assignVal, left, err := chopNode(accum)
 
 		if err != nil {
 			return n, nil, err
@@ -231,8 +215,11 @@ func chopNode(ts []token) (node, []token, error) {
 			err := fmt.Errorf("assigning to an empty value")
 			return n, nil, err
 		}
+		if len(left) != 0 {
+			panic("tokens left after processing assignment")
+		}
 
-		return assignVal, left, nil
+		return assignVal, ts, nil
 
 	case ts[0].t == ttLet:
 		if len(ts) < 4 {
